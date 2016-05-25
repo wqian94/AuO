@@ -1,4 +1,4 @@
-AuO version 0.2 (beta)
+AuO version 0.3 (beta)
 ===
 AuO, a browser-based audio recording and editing application. Uses browser-native technologies to
 avoid third-party dependencies.
@@ -72,6 +72,12 @@ default value of 100% by clicking the `Zoom reset` button.
 
 Increasing the zoom allows the user to set trimmings and playback points more accurately;
 decreasing the zoom allows the user to better navigate through the entire audio track.
+
+## Panning
+
+At any point, the user can pan by dragging the graphs where the ticker and trimming boxes do not
+cover the graphs. Dragging from right to left will pan right, and dragging from left to right will
+pan left.
 
 ## Idling
 
