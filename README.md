@@ -1,7 +1,12 @@
-AuO version 0.3 (beta)
+AuO version 0.4 (beta)
 ===
 AuO, a browser-based audio recording and editing application. Uses browser-native technologies to
 avoid third-party dependencies.
+
+# Licensing
+
+AuO is released under the MIT License. See the LICENSE file in the repository for full license
+details.
 
 # Using AuO
 
@@ -96,6 +101,9 @@ The ticker is the red bar on the graph. This represents where AuO will begin pla
 recording when the user clicks `Play`. By moving this bar around, the user can allow AuO to begin
 playing at different locations in the recording.
 
+When hovering over the ticker, a label will appear next to the ticker to indicate the time that the
+ticker is at.
+
 ## Trimming Boxes
 
 At either end of the graph, there is a blue box with an arrow pointing toward the graph. These are
@@ -103,6 +111,11 @@ the trimming boxes. The one on the left is the start-trimming box, and the one o
 end-trimming box. These boxes represent the start and end of the trimmed audio recording,
 respectively, and if one were to save the recording, the produced audio clip will contain only the
 audio between the two boxes.
+
+Similar to the ticker, when hovering over the trimming boxes, a label will appear next to the inner
+edge of the box, indicating the trimming. Note that the start-trimming box displays positive time
+to indicate offset from the start, and the end-trimming box displays negative time to indicate
+offset from the end.
 
 ## Audio Playback
 
