@@ -1,4 +1,4 @@
-AuO version 0.4 (beta)
+AuO version 0.5 (beta)
 ===
 AuO, a browser-based audio recording and editing application. Uses browser-native technologies to
 avoid third-party dependencies.
@@ -144,6 +144,12 @@ position as it can.
 By clicking the `Save` button, the user can upload the trimmed audio recording to the server, which
 should reply with a link to the saved audio clip. The user can retrieve this link from the dialog
 box that pops up when the saving has succeeded.
+
+Users can choose the format in which AuO will save the audio recording by selecting the format from
+the dropdown menu next to the `Save` button.
+
+Currently, for Chrome 49, only WAV is available, while for Chrome 50+, both WAV and WebM are
+available.
 
 # Providing a backend for AuO
 
