@@ -19,12 +19,17 @@ if (!is_dir("sounds")) {
 header('Access-Control-Allow-Headers: content-type');
 header('Access-Control-Allow-Origin: *');
 
+// Content type information.
+$content_type = $_SERVER["CONTENT_TYPE"];
+preg_match('/^audio\/([^; ]+); codecs=([^ ]+)/', $content_type, $content_type_matches);
+$save_format = $content_type_matches[1];
+
 $raw = file_get_contents('php://input');
 
 // Create a unique filename by md5 hashing.
 $counter = 0;
 do {
-    $filename = md5(date('U') . $raw . (++$counter)) . ".webm";
+    $filename = md5(date('U') . $raw . (++$counter)) . ".$save_format";
 } while (file_exists("sounds/$filename"));
 
 file_put_contents("sounds/$filename", $raw);
