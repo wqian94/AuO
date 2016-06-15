@@ -1,0 +1,3 @@
+[submodule "tests"]
+	path = tests
+	url = git@bitbucket.org:wqian94/auo-tests.git
