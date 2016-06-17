@@ -69,9 +69,9 @@ When AuO first launches, the user will see only the options to record and zoom, 
 captured any audio data yet. The first thing the user should do at this stage is click the `Record`
 button.
 
-![Initial Launch Screenshot 1440x900](img/initial-screen/auo-1440x900.png =x400)
-![Initial Launch Screenshot 1280x950](img/initial-screen/auo-1280x950.png =x400)
-![Initial Launch Screenshot 360x640](img/initial-screen/auo-360x640.png =x400)  
+<img src="img/initial-screen/auo-1440x900.png" alt="Initial Launch Screenshot 1440x900" height="400" />
+<img src="img/initial-screen/auo-1280x950.png" alt="Initial Launch Screenshot 1280x950" height="400" />
+<img src="img/initial-screen/auo-360x640.png" alt="Initial Launch Screenshot 360x640" height="400" />  
 Above: Initial launch screenshots from a 1440px &times; 900px screen (larger laptop), 1280px &times;
 950px screen (smaller laptop), and 360px &times; 640px screen (smartphone) in Google Chrome Version
 51.0.2704.84 on Ubuntu Linux 14.04 (Trusty).
@@ -115,9 +115,9 @@ The user can identify this by seeing if a graph exists, and whether the `Record`
 yet and is not in the idle state; similarly, if any of the three mentioned buttons has been
 disabled, then AuO is currently performing that action and is not in the idle state.
 
-![Idle State Screenshot 1440x900](img/idle-screen/auo-1440x900.png =x400)
-![Idle State Screenshot 1280x950](img/idle-screen/auo-1280x950.png =x400)
-![Idle State Screenshot 360x640](img/idle-screen/auo-360x640.png =x400)  
+<img src="img/idle-screen/auo-1440x900.png" alt="Idle State Screenshot 1440x900" height="400" />
+<img src="img/idle-screen/auo-1280x950.png" alt="Idle State Screenshot 1280x950" height="400" />
+<img src="img/idle-screen/auo-360x640.png" alt="Idle State Screenshot 360x640" height="400" />  
 Above: Idle state screenshots from a 1440px &times; 900px screen (larger laptop), 1280px &times;
 950px screen (smaller laptop), and 360px &times; 640px screen (smartphone) in Google Chrome Version
 51.0.2704.84 on Ubuntu Linux 14.04 (Trusty).
