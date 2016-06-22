@@ -1,4 +1,4 @@
-AuO version 1.1 (stable)
+AuO version 1.2 (stable)
 ===
 AuO (IPA: /ao/), a browser-based audio recording and editing application. Uses browser-native
 technologies to avoid third-party dependencies.
@@ -16,11 +16,15 @@ Include AuO in any application by including AuO.js. Then, create an instance wit
 const auo = new AuO(link_to_server_url, save_callback_function);
 ```
 
-where `link_to_server` is the URL to upload audio clips and `save_callback_function` is the
-callback function used to process the server's response after uploading the saved audio file.
-To use the default callback (a prompt box that displays the server's response), only set
-`link_to_server_url`. To disable online saving, create an instance without any parameters, e.g.
-`new AuO()`.
+where `link_to_server` is the URL to upload audio clips and `save_callback_function` is the callback
+function used to process the server's response after uploading the saved audio file. To use the
+default callback (a prompt box that displays the server's response), only set `link_to_server_url`.
+
+If `link_to_server_url` is null, then `save_callback_function` is called with the audio Blob as its
+sole parameter, instead of a server response. If both `link_to_server_url` and
+`save_callback_function` are omitted or null (both default to null), then the default local save
+handler is invoked on save. This triggers the download of the audio recording with the name
+`recording.ext` where `ext` is the appropriate extension for the save format chosen from the UI.
 
 To launch AuO, simply call
 
@@ -172,7 +176,12 @@ position as it can.
 
 By clicking the `Save` button, the user can upload the trimmed audio recording to the server, which
 should reply with a link to the saved audio clip. The user can retrieve this link from the dialog
-box that pops up when the saving has succeeded.
+box that pops up when the saving has succeeded. Both of these behaviors can be changed by altering
+the server code as well as the callback handler.
+
+If the server URL has been omitted or set to null, then clicking the `Save` button will instead
+trigger a local file download by default, though this can also be altered by passing in a callback
+handler that receives the audio Blob.
 
 Users can choose the format in which AuO will save the audio recording by selecting the format from
 the dropdown menu next to the `Save` button.
