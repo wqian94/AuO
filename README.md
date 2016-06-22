@@ -1,4 +1,4 @@
-AuO version 1.2 (stable)
+AuO version 1.3 (stable)
 ===
 AuO (IPA: /ao/), a browser-based audio recording and editing application. Uses browser-native
 technologies to avoid third-party dependencies.
