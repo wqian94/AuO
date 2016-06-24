@@ -1,1 +1,1 @@
-exclude: [test, .gitmodules, .git/modules/tests]
+exclude: [tests]
