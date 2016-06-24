@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en_US">
+    <head>
+        <title>AuO Demonstration</title>
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+        <meta content="height=device-height, width=device-width, initial-scale=1.0" name="viewport">
+        <script type="application/javascript" src="lib/AuO.js"></script>
+    </head>
+    <body style="margin:0;padding:0;">
+        <script type="application/javascript">
+            // Upload to localhost/AuO using the default save callback.
+            const auo = new AuO();
+            auo.launch();
+        </script>
+        <div style="display:block;height:100vh;text-align:center;white-space:nowrap;">
+            <div style="display:inline-block;height:100%;vertical-align:middle;width:0;"></div>
+            <button onclick="auo.launch();" style="display:inline-block;font:36pt serif;padding:0.25em;vertical-align:middle;">Launch AuO</button>
+        </div>
+    </body>
+</html>
