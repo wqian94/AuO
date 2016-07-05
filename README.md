@@ -1,4 +1,4 @@
-AuO version 1.3 (stable)
+AuO version 1.4 (stable)
 ===
 AuO (IPA: /ao/), a browser-based audio recording and editing application. Uses browser-native
 technologies to avoid third-party dependencies.
@@ -62,10 +62,10 @@ again to relaunch the interface using the same instance.
 # The AuO User Interface
 
 AuO currently supports audio recording, playback, editing, and saving to a remote server. Currently,
-there is no support for loading from and saving to a local file, or saving to any format other than
-WebM and WAV. In addition, the user can also zoom in and out to focus on parts of the audio clip. At
-the moment, AuO supports up to 16 levels of zoom, for a total magnification of approximately 18.5
-times the original view of the waveform.
+there is no support for loading from and saving to any format other than WebM and WAV. In addition,
+the user can also zoom in and out to focus on parts of the audio clip. At the moment, AuO supports
+up to 16 levels of zoom, for a total magnification of approximately 18.5 times the original view of
+the waveform.
 
 ## Initial Launch
 
@@ -94,6 +94,14 @@ zoom does not equal 100%.
 
 To stop recording, the user can hit the `Stop` button. AuO will briefly pause to preprocess the
 data for playbacks and saves, before entering the idle state.
+
+## Audio Loading
+
+Users can select an audio file to upload into the editor by clicking the area next to the `Load`
+button. This will produce a popup window for selecting a file from the local filesystem to load into
+the audio editor. After selecting a file, the name of the file to load will show up next to the
+`Load` button. Clicking the now-enabled `Load` button will load the file into the editor. At this
+point, the user can continue to use AuO as if the audio track had just been recorded.
 
 ## Zooming
 
