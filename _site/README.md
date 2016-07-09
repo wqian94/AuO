@@ -1,4 +1,4 @@
-AuO version 1.4 (stable)
+AuO version 1.5 (stable)
 ===
 AuO (IPA: /ao/), a browser-based audio recording and editing application. Uses browser-native
 technologies to avoid third-party dependencies.
@@ -13,18 +13,19 @@ details.
 Include AuO in any application by including AuO.js. Then, create an instance with
 
 ```javascript
-const auo = new AuO(link_to_server_url, save_callback_function);
+const auo = new AuO(link_to_server_url, online_save_callback, local_save_callback);
 ```
 
-where `link_to_server` is the URL to upload audio clips and `save_callback_function` is the callback
-function used to process the server's response after uploading the saved audio file. To use the
-default callback (a prompt box that displays the server's response), only set `link_to_server_url`.
+where `link_to_server` is the URL to upload audio clips and `online_save_callback` is the callback
+function used to process the server's response after uploading the saved audio file. Similarly, the
+`local_save_callback` is invoked when the user chooses to save offline, and receives a blob as its
+sole parameter. This triggers the download of the audio recording with the name `recording.ext`
+where `ext` is the appropriate extension for the save format chosen from the UI.
 
-If `link_to_server_url` is null, then `save_callback_function` is called with the audio Blob as its
-sole parameter, instead of a server response. If both `link_to_server_url` and
-`save_callback_function` are omitted or null (both default to null), then the default local save
-handler is invoked on save. This triggers the download of the audio recording with the name
-`recording.ext` where `ext` is the appropriate extension for the save format chosen from the UI.
+To use the default callbacks (a modal dialog that displays the server's response
+for online and a save prompt for local), either set the callbacks to `null` during construction, or
+do not set them at all (they will default to `null`, then be replaced with their defaults).
+
 
 To launch AuO, simply call
 
@@ -49,23 +50,28 @@ again to relaunch the interface using the same instance.
 
 ## Supported Browsers and Operating Systems
 
-<table class="supported-browser">
+<table>
     <tr><th style="border-top:0;border-left:0;">&nbsp;</th><th>Linux (Debian/Ubuntu)</th><th>Windows</th><th>Max OS X</th></tr>
-    <tr><td>Chrome</td><td class="supported">49.0+</td><td class="supported">49.0+</td><td class="supported">49.0+</td></tr>
-    <tr><td>Firefox</th><td class="no-support">&#x2718;</td><td class="no-support">&#x2718;</td><td class="no-support">&#x2718;</td></tr>
-    <tr><td>Edge</th><td class="no-support">&#x2718;</td><td class="no-support">&#x2718;</td><td class="no-support">&#x2718;</td></tr>
-    <tr><td>Internet Explorer</th><td class="no-support">&#x2718;</td><td class="no-support">&#x2718;</td><td class="no-support">&#x2718;</td></tr>
-    <tr><td>Opera</th><td class="no-support">&#x2718;</td><td class="no-support">&#x2718;</td><td class="no-support">&#x2718;</td></tr>
-    <tr><td>Safari</th><td class="no-support">&#x2718;</td><td class="no-support">&#x2718;</td><td class="no-support">&#x2718;</td></tr>
+    <tr><td>Chrome</td><td>49.0+<sup>[1]</sup></td><td>49.0+<sup>[1]</sup></td><td>49.0+<sup>[1]</sup></td></tr>
+    <tr><td>Firefox</th><td>45.2+<sup>[2]</sup></td><td>45.2+<sup>[2]</sup></td><td>45.2+<sup>[2]</sup></td></tr>
+    <tr><td>Edge</th><td>&#x2718;</td><td>&#x2718;</td><td>&#x2718;</td></tr>
+    <tr><td>Internet Explorer</th><td>&#x2718;</td><td>&#x2718;</td><td>&#x2718;</td></tr>
+    <tr><td>Opera</th><td>&#x2718;</td><td>&#x2718;</td><td>&#x2718;</td></tr>
+    <tr><td>Safari</th><td>&#x2718;</td><td>&#x2718;</td><td>&#x2718;</td></tr>
 </table>
+
+Notes:
+
+1. Chrome 49 does not support saving as WebM, so that save option is not shown in Chrome 49.
+2. Firefox does not support loading some file formats, claiming that those formats are malformed.
 
 # The AuO User Interface
 
 AuO currently supports audio recording, playback, editing, and saving to a remote server. Currently,
-there is no support for loading from and saving to any format other than WebM and WAV. In addition,
-the user can also zoom in and out to focus on parts of the audio clip. At the moment, AuO supports
-up to 16 levels of zoom, for a total magnification of approximately 18.5 times the original view of
-the waveform.
+there is no support for saving to any format other than WebM and WAV, though many formats are
+supported for loading. In addition, the user can also zoom in and out to focus on parts of the audio
+clip. At the moment, AuO supports up to 16 levels of zoom, for a total magnification of
+approximately 18.5 times the original view of the waveform.
 
 ## Initial Launch
 
@@ -95,14 +101,6 @@ zoom does not equal 100%.
 To stop recording, the user can hit the `Stop` button. AuO will briefly pause to preprocess the
 data for playbacks and saves, before entering the idle state.
 
-## Audio Loading
-
-Users can select an audio file to upload into the editor by clicking the area next to the `Load`
-button. This will produce a popup window for selecting a file from the local filesystem to load into
-the audio editor. After selecting a file, the name of the file to load will show up next to the
-`Load` button. Clicking the now-enabled `Load` button will load the file into the editor. At this
-point, the user can continue to use AuO as if the audio track had just been recorded.
-
 ## Zooming
 
 At any point during recording and playback, or when AuO is idling, the user can click the `Zoom in`
@@ -123,9 +121,9 @@ pan left.
 
 AuO's idle state occurs when AuO has a recording stored, but no active actions on that recording.
 The user can identify this by seeing if a graph exists, and whether the `Record`, `Play`, and
-`Save` buttons have been disabled. If the graph does not exist, then AuO has not recorded anything
-yet and is not in the idle state; similarly, if any of the three mentioned buttons has been
-disabled, then AuO is currently performing that action and is not in the idle state.
+`Upload` (or `Download`) buttons have been disabled. If the graph does not exist, then AuO has not
+recorded anything yet and is not in the idle state; similarly, if any of the three mentioned buttons
+has been disabled, then AuO is currently performing that action and is not in the idle state.
 
 <img src="img/idle-screen/auo-1440x900.png" alt="Idle State Screenshot 1440x900" height="400" />
 <img src="img/idle-screen/auo-1280x950.png" alt="Idle State Screenshot 1280x950" height="400" />
@@ -145,6 +143,30 @@ playing at different locations in the recording.
 
 When hovering over the ticker, a label will appear next to the ticker to indicate the time that the
 ticker is at.
+
+### Tagging
+
+At any point, users can tag the current location of the ticker by clicking the `Tag...` button. This
+will pop up a modal that prompts the user for a string label. If an empty string is given, the label
+will default to the time for that tag. Users can then return to that time in the idle state by
+clicking the tag. Shift-clicking a tag will cause it to disappear, deleting it from the list of
+current tags.
+
+![Tag Labeling Modal Dialog](img/tag-modal/auo-tag-modal.png)
+
+Additionally, tagging an already-tagged time will overwrite the previous label, and can be used to
+update labels. Note that the default value for the label will always be the time; re-tagging and
+then closing the modal will automatically relabel the tag with the time.
+
+Furthermore, the call
+
+```javascript
+auo.getTags();
+```
+
+returns a map from the times (in integer milliseconds) to their string labels. Note that these times
+are relative to the trimmed start at the time that the API call is made, and tags that fall outside
+the playable range are not included in the map.
 
 ## Trimming Boxes
 
@@ -180,19 +202,57 @@ with the trimming boxes. If the trimming was made in error, repositioning the tr
 playing the trimmed audio will allow the ticker to reposition itself as close to its original
 position as it can.
 
+# Loading and Saving
+
+AuO has built-in functionality to allow users to load audio from and save audio to both the local
+filesystem as well as external servers. This functionality is toggled through the resource marker,
+which is between the Load and Save UIs. There are two options, `Online` and `Offline`, which
+affects both loading and saving at the same time. The active mode is highlighted in green, while
+the inactive mode is grayed out. By clicking on the two toggle options, the user can switch between
+the two modes.
+
+![Online Mode](img/resource/auo-online-ui.png)  
+Above: The load and save UIs in online mode.
+
+![Offline Mode](img/resource/auo-offline-ui.png)  
+Above: The load and save UIs in offline mode.
+
+
+## Audio Loading
+
+Users can select an audio file to upload into the editor by clicking the area next to the `Load`
+button. This will produce a popup window for selecting a file from the local filesystem to load into
+the audio editor. After selecting a file, the name of the file to load will show up next to the
+`Load` button. Clicking the now-enabled `Load` button will load the file into the editor. At this
+point, the user can continue to use AuO as if the audio track had just been recorded.
+
+The audio formats supported for loading are listed below:
+
+- Advanced Audio Coding (AAC; .aac)
+- Moving Pictures Experts Group (MPEG, MP3, MP4; .m4a, .m4p, .mp3, .mp4, .mpa, .mpe, .mpg, .mpeg)
+- Ogg (OGG; .ogg, .ogv)
+- Waveform Audio File Format (WAVE; .wav, .wave)
+- WebM (WEBM; .webm)
+
 ## Audio Saving
 
-By clicking the `Save` button, the user can upload the trimmed audio recording to the server, which
-should reply with a link to the saved audio clip. The user can retrieve this link from the dialog
-box that pops up when the saving has succeeded. Both of these behaviors can be changed by altering
-the server code as well as the callback handler.
+When in online mode, the user can click the `Upload` button to save and upload the audio recording
+to the server, which should reply with a link to the saved audio clip. The user can then retrieve
+this link from the modal dialog that pops up when the saving has succeeded. Both the location of the
+server to upload to and the callback handler upon a successful save can be changed by passing in the
+appropriate parameters to AuO's constructor. If using a custom handler on successfuly save, the
+handler should take an XMLHttpRequest object as its parameter, and the link should reside in the
+response property of that object.
 
-If the server URL has been omitted or set to null, then clicking the `Save` button will instead
-trigger a local file download by default, though this can also be altered by passing in a callback
-handler that receives the audio Blob.
+When in offline mode, the user can click the `Download` button to initiate a local file download
+using the browser's file download prompt. This can be customized with a handler as well; this
+handler should accept a JavaScript blob containing the audio data to save.
+
+If the server URL has been omitted or set to null, then online saving is disabled, and the `Upload`
+button will not be enabled.
 
 Users can choose the format in which AuO will save the audio recording by selecting the format from
-the dropdown menu next to the `Save` button.
+the dropdown menu next to the `Upload` or `Download` button.
 
 Currently, for Chrome 49, only WAV is available, while for Chrome 50+, both WAV and WebM are
 available.
@@ -202,13 +262,42 @@ available.
 The callback function is the second parameter in the constructor for a new AuO instance, and is
 optional. This callback function is called once the server has responded with an HTTP 2xx in
 response to the user's save request. If this parameter is omitted during construction, AuO will use
-the default callback function, which produces a prompt dialog box with the server's response, as
+the default callback function, which produces a modal dialog box with the server's response, as
 shown in the image below:
 
-![Default Save Callback Prompt Dialog](img/save-prompt/auo-save-prompt.png)
+![Default Save Callback Modal Dialog](img/save-modal/auo-save-modal.png)
 
 If the parameter was provided during construction, AuO will call that function and pass in one
 parameter: the XMLHttpRequest object, whose `response` field contains the server's response.
+
+# Hotkeys
+
+For convenience, AuO has hotkeys mapped to several of the main functions of AuO. They are mapped
+below:
+
+<table>
+    <tr><th>Key combinations</th><th>Key description</th><th>Function</th></tr>
+    <tr><td><kbd>&#x25C4;</kbd></td><td>Left arrow key</td><td>Move ticker left by 1 pixel, to an earlier time.</td></tr>
+    <tr><td><kbd>&#x25BA;</kbd></td><td>Right arrow key</td><td>Move ticker right by 1 pixel, to a later time.</td></tr>
+    <tr><td><kbd>Shift</kbd> + <kbd>&#x25C4;</kbd></td><td>Shift + left arrow key</td><td>Move ticker left by 100 pixels, to an earlier time.</td></tr>
+    <tr><td><kbd>Shift</kbd> + <kbd>&#x25BA;</kbd></td><td>Shift + right arrow key</td><td>Move ticker right by 100 pixels, to a later time.</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>&#x25C4;</kbd></td><td>Ctrl + left arrow key</td><td>Scroll waveform display left by 10 pixels, to an earlier time.</td></tr>
+    <tr><td><kbd>Ctrl</kbd> + <kbd>&#x25BA;</kbd></td><td>Ctrl + right arrow key</td><td>Scroll waveform display right by 10 pixels, to a later time.</td></tr>
+    <tr><td><kbd>[</kbd></td><td>Left square bracket key</td><td>Increase size of the start trimming box.</td></tr>
+    <tr><td><kbd>]</kbd></td><td>Right square bracket key</td><td>Increase size of the end trimming box.</td></tr>
+    <tr><td><kbd>Shift</kbd> + <kbd>[</kbd> (a.k.a. <kbd>{</kbd>)</td><td>Shift + left square bracket key (a.k.a. left curly brace)</td><td>Decrease size of the start trimming box.</td></tr>
+    <tr><td><kbd>Shift</kbd> + <kbd>]</kbd> (a.k.a. <kbd>}</kbd>)</td><td>Shift + right square bracket key (a.k.a. right curly brace)</td><td>Decrease size of the end trimming box.</td></tr>
+    <tr><td><kbd>+</kbd></td><td>Plus key</td><td>Zoom in.</td></tr>
+    <tr><td><kbd>-</kbd></td><td>Minus key</td><td>Zoom out.</td></tr>
+    <tr><td><kbd>0</kbd></td><td>Zero key</td><td>Zoom reset.</td></tr>
+    <tr><td><kbd>f</kbd></td><td>F key</td><td>Focus on the ticker, centering the ticker in the display as much as possible without having the display go out of bounds.</td></tr>
+    <tr><td><kbd>l</kbd></td><td>L key</td><td>Focus on the audio file loader. If in online mode, will focus on the URL input box. If in offline mode, will pop up file selector dialog.</td></tr>
+    <tr><td><kbd>o</kbd></td><td>O key</td><td>Toggle between online/offline modes.</td></tr>
+    <tr><td><kbd>r</kbd></td><td>R key</td><td>Begin recording an audio clip.</td></tr>
+    <tr><td><kbd>s</kbd></td><td>S key</td><td>Save the trimmed audio clip in the mode (online/offline) that is currently active.</td></tr>
+    <tr><td><kbd>t</kbd></td><td>T key</td><td>Tag the current ticker time.</td></tr>
+    <tr><td><kbd>Space</kbd></td><td>Spacebar</td><td>Emulates clicking either the Stop or Play button, whichever one is enabled.</td></tr>
+</table>
 
 # Providing a backend for AuO
 
