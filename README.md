@@ -73,9 +73,9 @@ When AuO first launches, the user will see only the options to record and zoom, 
 captured any audio data yet. The first thing the user should do at this stage is click the `Record`
 button.
 
-<img src="img/initial-screen/auo-1440x900.png" alt="Initial Launch Screenshot 1440x900" height="400" />
-<img src="img/initial-screen/auo-1280x950.png" alt="Initial Launch Screenshot 1280x950" height="400" />
-<img src="img/initial-screen/auo-360x640.png" alt="Initial Launch Screenshot 360x640" height="400" />  
+<img src="img/launch-screen/auo-1440x900.png" alt="Initial Launch Screenshot 1440x900" height="400" />
+<img src="img/launch-screen/auo-1280x950.png" alt="Initial Launch Screenshot 1280x950" height="400" />
+<img src="img/launch-screen/auo-360x640.png" alt="Initial Launch Screenshot 360x640" height="400" />  
 Above: Initial launch screenshots from a 1440px &times; 900px screen (larger laptop), 1280px &times;
 950px screen (smaller laptop), and 360px &times; 640px screen (smartphone) in Google Chrome Version
 51.0.2704.84 on Ubuntu Linux 14.04 (Trusty).
