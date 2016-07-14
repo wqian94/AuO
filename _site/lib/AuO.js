@@ -1,7 +1,7 @@
 /**
  * AuO.js
  *
- * Version 1.4 (stable) distribution.
+ * Version 1.5 (stable) distribution.
  *
  * Main entry point for the AuO library. Create a new instance of AuO by calling new AuO(). Calling
  * launch() adds the instance to the DOM tree, and calling suspend() removes the instance from the
@@ -19,12 +19,13 @@
  * If SAVE_CALLBACK is null, then the default behavior is used, which is to prompt the user to
  * locally download the blob.
  *
- * If both parameters are omitted, then local file handling runs with the default callback, as if
- * both parameters were null.
+ * The third parameter is the LOCAL_SAVE_CALLBACK handler, which will run for offline saves. The
+ * default behavior is to prompt the user to save the track onto the local filesystem, but this can
+ * be changed. LOCAL_SAVE_CALLBACK takes in the blob as its sole parameter.
  *
  * @constructor
  */
-const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
+const AuO = function (/* SAVE_URL = null, SAVE_CALLBACK = null, LOCAL_SAVE_CALLBACK */) {
     ////////////////////////////////////////////////////////////////////////////////////////////////
     //
     // Functions in the AuO interface.
@@ -55,6 +56,19 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
      */
     this.suspend = function () {
         suspendInstance();
+    };
+
+    /**
+     * Returns an array of the tagged times. All times are represented in milliseconds. The produced
+     * array is a defensive copy, so the values can be freely changed without affecting AuO.
+     */
+    this.getTags = function () {
+        const tags = {};
+        for (var item in state.tags) {
+            const time = item;
+            tags[parseInt(1000 * time)] = state.tags[time];
+        };
+        return tags;
     };
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -104,10 +118,15 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
      */
     const stateReset = function () {
         state.audioBuffer = null;
+        state.audioOnDrag = function () {};
+        state.audioOnDrop = function () {};
         state.audioPlaybackCurrentTime = function () {
             return 0;
         };
         state.audioPlaybackSource = null;
+        state.bindKeys = true;
+        state.callbackDraw = null;
+        state.callbackTag = null;
         state.data = [];
         state.dataIndicesProcessed = 0;
         state.dataSamplesProcessed = 0;
@@ -115,25 +134,26 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
         state.drawing = false;
         state.elapsedTime = 0;
         state.endRecording = false;
+        state.online = false;
         state.playing = false;
         state.recording = false;
+        state.running = false;
+        state.tags = {};
+        state.tagsSynced = false;
         state.trimEnd = 0;  // In seconds.
         state.trimStart = 0;  // In seconds.
+        state.zoom = 0;
     };
 
     /**
-     * Code run at the end of constructing a new AuO instance.
+     * Code run at the end of constructing a new AuO instance. Mostly for actions that require the
+     * DOM tree to already exist.
      */
     const runtimeAtConstruction = function () {
-        state.running = false;
-
-        state.audioOnDrag = function () {};
-        state.audioOnDrop = function () {};
-
-        state.callbackDraw = null;
         stateReset();
 
-        state.zoom = 0;
+        addAudioDropHandlers();
+
         zoomUpdate();
 
         editorMode(false);
@@ -194,12 +214,6 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
             context.stroke();
         })();
 
-        // Flag for whether to automatically sync the audio ticker.
-        state.audioTickerSync = true;
-
-        // Flag for whether to automatically sync the trimmer.
-        state.audioTrimSync = true;
-
         // Ensures that the visualizer layer sits above the display itself.
         audioVisualizer.style("z-index", 1 + parseInt(container.element().style.zIndex));
         audioTicker.style("z-index", 2 + parseInt(container.element().style.zIndex));
@@ -209,11 +223,14 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
         audioDisplay.set("height", audioDisplay.element().clientHeight);
 
         idleControls();
-        toggleInput(buttonPlay, false);
-        toggleInput(buttonSave, false);
+
+        onlineResource(false);
 
         beginAudioDisplayLoop();
+        beginTagUpdateLoop();
         window.addEventListener("resize", animateAudioDisplayByForce);
+
+        container.element().focus();
     };
 
     /**
@@ -223,6 +240,10 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
         if (!isNil(state.callbackDraw)) {
             clearInterval(state.callbackDraw);
             state.callbackDraw = null;
+        }
+        if (!isNil(state.callbackTagUpdate)) {
+            clearInterval(state.callbackTagUpdate);
+            state.callbackTagUpdate = null;
         }
         if (!isNil(state.audioPlaybackSource)) {
             state.audioPlaybackSource.stop();
@@ -235,35 +256,6 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
     //
-    // Process constructor arguments.
-    //
-    ////////////////////////////////////////////////////////////////////////////////////////////////
-
-    /**
-     * Local save callback function. Creates a new anchor that targets the blob, then activates the
-     * link. The blob to target is the input argument.
-     */
-    const LOCAL_SAVE_CALLBACK = function (blob) {
-        new FunctionalElement("a")
-            .set("target", "_blank")
-            .set("href", window.URL.createObjectURL(blob))
-            .set("download", "recording." + saveFormat())
-            .element().click();
-    };
-
-    // Default callback assignment.
-    if (null === SAVE_CALLBACK) {
-        if (null === SAVE_URL) {
-            SAVE_CALLBACK = LOCAL_SAVE_CALLBACK;
-        } else {
-            SAVE_CALLBACK = function (request) {
-                prompt("Link to saved audio clip: ", request.response);
-            };
-        }
-    }
-
-    ////////////////////////////////////////////////////////////////////////////////////////////////
-    //
     // General tools for working with the WebAudio and MediaStream APIs.
     //
     ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -272,7 +264,7 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
 
     // TODO: Remove this once navigator.mediaDevices.getUserMedia becomes supported.
     navigator.getUserMedia = navigator.getUserMedia || navigator.webkitGetUserMedia ||
-                         navigator.mozGetUserMedia || navigator.msGetUserMedia;
+        navigator.mozGetUserMedia || navigator.msGetUserMedia;
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
     //
@@ -296,12 +288,8 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
             if (true === state.dataUpdated) {
                 window.requestAnimationFrame(animateAudioDisplay);
             }
-            if (true === state.audioTickerSync) {
-                window.requestAnimationFrame(animateAudioTicker);
-            }
-            if (true === state.audioTrimSync) {
-                window.requestAnimationFrame(animateAudioTrimmers);
-            }
+            window.requestAnimationFrame(animateAudioTicker);
+            window.requestAnimationFrame(animateAudioTrimmers);
         }, millisecondsPerFrame);
     };
 
@@ -352,7 +340,8 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
             for (var i = 0; i < audioDisplay.count(); i++) {
                 canvases.push(audioDisplay.element(i).getContext("2d"));
             }
-            for (const canvas of canvases) {
+            for (var item of canvases) {
+                const canvas = item;
                 canvas.clearRect(0, 0, canvasWidth, canvasHeight);
                 canvas.lineWidth = 1;
                 canvas.strokeStyle = "rgb(0, 0, 0)";
@@ -416,13 +405,15 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
             for (var time = 0; time < totalTime + timeStep; time += timeStep) {
                 const x = time * zoomFactor() * viewWidth / totalTime;
                 const displayString = time.toFixed(fixPoint) + "s";
-                for (const canvas of canvases) {
+                for (var item of canvases) {
+                    const canvas = item;
                     canvas.font = "10px serif";
                     canvas.fillText(displayString, x - 2.5 * displayString.length, canvasHeight);
                 }
             }
 
-            for (const canvas of canvases) {
+            for (var item of canvases) {
+                const canvas = item;
                 canvas.stroke();
 
                 canvas.fillStyle = "rgba(50, 150, 50, 0.5)";
@@ -536,7 +527,8 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
 
         // Populate the buffer.
         var sample = 0;
-        for (const series of state.data) {
+        for (var dataItem of state.data) {
+            const series = dataItem;
             for (var item = 0; item < series[0].length; item++) {
                 for (var channel = 0; channel < numberOfChannels; channel++) {
                     const value = series[channel][item];
@@ -594,7 +586,9 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
      * Takes in start and end times to play back the recording between those. Defaults to playing
      * the entire recording if no parameters are passed in.
      */
-    const beginAudioPlayback = function (start = 0, end = Infinity) {
+    const beginAudioPlayback = function (/* start = 0, end = Infinity */) {
+        const start = getArgument(arguments, 0, 0);
+        const end = getArgument(arguments, 1, Infinity);
         if (Infinity === end) {
             end = state.elapsedTime;
         }
@@ -633,12 +627,51 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
     ////////////////////////////////////////////////////////////////////////////////////////////////
 
     /**
-     * Loads an audio file from the local filesystem into the buffer, as if it were just recorded,
-     * using the files selected in the file selector.
+     * Loads an audio file, from either the local filesystem or retrieved over the Internet, into
+     * the buffer as if it were just recorded, using the file selected in the file selector or at
+     * the given URL.
      */
     const beginAudioLoad = function (files) {
-        // Read in files.
-        for (const file of files) {
+        if (state.online) {
+            // Convert URLs to file objects.
+            const request = new XMLHttpRequest();
+            request.open("GET", files[0], true);  // There should only be one URL to load.
+            request.responseType = "blob";
+            request.onload = function (event) {
+                if (this.status >= 200 && this.status < 300) {
+                    const type = this.getResponseHeader("content-type");
+                    if (getSupportedMediaTypes().includes(type)) {
+                        loadArrayOfBlobs([this.response]);
+                    } else {
+                        idleControls();
+                        alert("Response from " + files[0] + " is not a supported audio type.");
+                    }
+                } else {
+                    console.error(event);
+                    idleControls();
+                    alert("An error occurred while trying to load from " + files[0] + ".");
+                }
+            };
+            request.onerror = function (event) {
+                console.error(event);
+                idleControls();
+                alert("An error occurred while trying to load from " + files[0] + ".");
+            };
+            request.send();
+        } else {
+            loadArrayOfBlobs(files);
+        }
+
+        loadFile.element().value = null;
+    };
+
+    /**
+     * Helper function for processing load via blobs.
+     */
+    const loadArrayOfBlobs = function (blobs) {
+        // Read in blobs.
+        for (var item of blobs) {
+            const blob = item;
             const loadReader = new FileReader();
             loadReader.onload = function (event) {
                 const audioData = event.target.result;
@@ -657,15 +690,44 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
 
                     editorMode(true);
                     idleControls();
+                }).catch(function (event) {
+                    console.error(event);
+                    alert("Audio file badly formatted. File " + blob.name + " cannot be loaded.");
+
+                    editorMode(true);
+                    idleControls();
                 });
             };
-            loadReader.readAsArrayBuffer(file);
+            loadReader.readAsArrayBuffer(blob);
 
             // TODO: Determine multiple-upload behavior and remove this line.
-            break;  // Only deal with first file.
+            break;  // Only deal with first blob.
         }
+    };
 
-        loadFile.element().value = null;
+    /**
+     * Handler for when a file has been loaded or URL has been entered.
+     */
+    const loadFileHandler = function (event) {
+        if (state.online) {
+            const url = loadFile.element().value;
+            const validity = loadFile.element().validity;
+            toggleInput(buttonLoad, 0 < url.length && validity.valid);
+        } else {
+            const files = loadFile.element().files;
+            if (0 < files.length) {
+                const selections = Array.prototype.reduce.call(files, function (prev, file) {
+                    prev.push(file.name);
+                    return prev;
+                }, []);
+                loadFileLabel.set("innerHTML", selections.sort().join("<br />"));
+                toggleInput(buttonLoad);
+                buttonLoad.element().focus();
+            } else {
+                loadFileLabel.set("innerHTML", "Click here to select file");
+                toggleInput(buttonLoad, false);
+            }
+        }
     };
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -679,7 +741,9 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
      * pass the file in as the parameter to the function onready. The start and end are given in
      * units of time (seconds).
      */
-    const beginAudioSave = function (onready, start = 0, end = Infinity) {
+    const beginAudioSave = function (onready /* , start = 0, end = Infinity */) {
+        const start = getArgument(arguments, 1, 0);
+        const end = getArgument(arguments, 2, Infinity);
         if (Infinity === end) {
             end = state.elapsedTime;
         }
@@ -798,6 +862,388 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
     //
+    // Functions for keeping the tag UI updated.
+    //
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+
+    const beginTagUpdateLoop = function () {
+        const fps = 60;
+        const millisecondsPerFrame = 1000 / fps;
+
+        state.callbackTagUpdate = setInterval(function () {
+            if (!state.tagsSynced) {
+                state.tagsSynced = true;
+                window.requestAnimationFrame(tagsUpdateUI);
+            }
+        }, millisecondsPerFrame);
+    };
+
+    /**
+     * Updates the tags UI.
+     */
+    const tagsUpdateUI = function () {
+        const list = tagList.element();
+
+        const tags = [];
+        for (var item in state.tags) {
+            const time = item;
+            tags.push({time: time, label: state.tags[time]});
+        }
+        tags.sort(function (a, b) {
+            return a.time - b.time;
+        });
+        const listChildren = [...list.children];  // Defensive copy to avoid messy indices.
+
+        // Indexing variables for iterating through the tags and the elements.
+        var tagIndex = 0, eleIndex = 0;
+        while (tags.length > tagIndex && listChildren.length > eleIndex) {
+            const tagLabel = tags[tagIndex].label;
+            const tagTime = tags[tagIndex].time;
+            const eleLabel = listChildren[eleIndex].textContent;
+            const eleTime = parseFloat(listChildren[eleIndex].getAttribute("value"));
+
+            // Using listChildren lets us avoid dealing with messy indices.
+            switch (tagTime > eleTime ? 1 : (tagTime < eleTime ? -1 : 0)) {
+                case 1:
+                    list.removeChild(listChildren[eleIndex]);
+                    eleIndex++;
+                    break;
+                case -1:
+                    list.insertBefore(tagCreateLabel(tagTime, tagLabel).element(),
+                        listChildren[eleIndex]);
+                    tagIndex++;
+                    break;
+                case 0:
+                    listChildren[eleIndex].innerHTML = tagLabel;
+                    eleIndex++;
+                    tagIndex++;
+                    break;
+                default:
+                    throw "Invalid tagLabelComparator return value.";
+            }
+        }
+
+        // Remove the trailing deleted tags.
+        while (listChildren.length > eleIndex) {
+            list.removeChild(listChildren[eleIndex]);
+            eleIndex++;
+        }
+
+        // Add the trailing new tags.
+        while (tags.length > tagIndex) {
+            tagList.append(tagCreateLabel(tags[tagIndex].time, tags[tagIndex].label));
+            tagIndex++;
+        }
+    };
+
+    /**
+     * Compares two tag labels via natural sort. Returns -1 if the first precedes, 1 if the first
+     * succeeds, and 0 if the two are equal.
+     */
+    const tagLabelComparator = function (labelA, labelB /* , timeA = 0, timeB = 0 */) {
+        const timeA = getArgument(arguments, 2, 0);
+        const timeB = getArgument(arguments, 3, 0);
+        const regex = /(\d*\.\d+|\d+\.?|((?!\d*\.\d+|\d+\.?).)+)/g;
+        const numericRegex = /\d*\.\d+|\d+\.?/g;
+        const tokensA = labelA.match(regex);
+        const tokensB = labelB.match(regex);
+        var i;
+        for (i = 0; tokensA.length > i && tokensB.length > i; i++) {
+            const tokenA = tokensA[i];
+            const tokenB = tokensB[i];
+            if (numericRegex.test(tokenA) && numericRegex.test(tokenB)) {
+                const numA = parseFloat(tokenA);
+                const numB = parseFloat(tokenB);
+                if (numA !== numB) {
+                    return numA < numB ? -1 : 1;
+                }
+            } else {
+                const compare = tokenA.localeCompare(tokenB);
+                if (0 !== compare) {
+                    return compare < 0 ? -1 : 1;
+                }
+            }
+        }
+
+        if (tokensA.length > i) {
+            return 1;
+        } else if (tokensB.length > i) {
+            return -1;
+        }
+        
+        return timeA > timeB ? 1 : (timeA < timeB ? -1 : 0);
+    };
+
+    /**
+     * Creates a new tag label element for the given time.
+     */
+    const tagCreateLabel = function (time, label) {
+        const titleMessage = "(" + parseFloat(time).toFixed(3) + "s) " +
+            "Left-click to jump to tagged time, shift-click to delete tag. " +
+            "Re-tag the same time to change the label.";
+        return new FunctionalElement("label")
+            .set("innerHTML", label.replace(/ /g, "&nbsp;"))
+            .set("title", titleMessage)
+            .set("value", time)
+            .listen("click", tagClickHandler);
+    };
+
+    /**
+     * Event handler for click tagging.
+     */
+    const tagClickHandler = function (event) {
+        const time = parseFloat(this.getAttribute("value"));
+        if (event.shiftKey) {  // Delete.
+            delete state.tags[time];
+            state.tagsSynced = false;
+        } else if (tagUI.element().classList.contains("idle")) {  // Jump only in idle state.
+            state.audioPlaybackCurrentTime = function () {
+                return time;
+            };
+        }
+    };
+ 
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Functions for using hotkeys.
+    //
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+
+    /**
+     * Handler for hotkeys via the container.
+     */
+    const hotkeyHandler = function (event) {
+        // Do not bind if key binding flag is off.
+        if (!state.bindKeys) {
+            return;
+        }
+
+        // Ignore key bindings on input elements.
+        if (event.target.tagName.match(/^input$/i)) {
+            return;
+        }
+
+        const maxScroll = audioVisualizer.element().clientWidth - audioUI.element().clientWidth;
+        const hasModifier = event.altKey || event.ctrlKey || event.metaKey || event.shiftKey;
+
+        switch (event.code) {
+            case "ArrowLeft":  // Left arrow key.
+                if (event.ctrlKey) {  // Ctrl key.
+                    const currentScroll = parseInt(audioUI.element().scrollLeft);
+                    const scrollAmount = 0.1 * maxScroll;
+                    const scroll = Math.max(0, currentScroll - scrollAmount);
+                    audioUI.element().scrollLeft = scroll;
+                } else if (event.shiftKey) {  // Shift key.
+                    if (!(state.playing || state.recording)) {
+                        const currentTime =
+                            Math.max(state.trimStart, Math.min(state.elapsedTime - state.trimEnd,
+                            state.audioPlaybackCurrentTime()));
+                        const dt = convertUnits(100, audioVisualizer.element().clientWidth,
+                            state.elapsedTime);
+                        const time = Math.max(0, currentTime - dt);
+                        state.audioPlaybackCurrentTime = function () {
+                            return time;
+                        };
+                    }
+                } else if (!hasModifier) {  // No modifiers.
+                    if (!(state.playing || state.recording)) {
+                        const currentTime =
+                            Math.max(state.trimStart, Math.min(state.elapsedTime - state.trimEnd,
+                            state.audioPlaybackCurrentTime()));
+                        const dt = convertUnits(1, audioVisualizer.element().clientWidth,
+                            state.elapsedTime);
+                        const time = Math.max(0, currentTime - dt);
+                        state.audioPlaybackCurrentTime = function () {
+                            return time;
+                        };
+                    }
+                } else {  // No binding to other modifiers.
+                    return;
+                }
+                break;
+            case "ArrowRight":  // Right arrow key.
+                if (event.ctrlKey) {  // Ctrl key.
+                    const currentScroll = parseInt(audioUI.element().scrollLeft);
+                    const scrollAmount = 0.1 * maxScroll;
+                    const scroll = Math.min(maxScroll, currentScroll + scrollAmount);
+                    audioUI.element().scrollLeft = scroll;
+                } else if (event.shiftKey) {  // Shift key.
+                    if (!(state.playing || state.recording)) {
+                        const currentTime =
+                            Math.max(state.trimStart, Math.min(state.elapsedTime - state.trimEnd,
+                            state.audioPlaybackCurrentTime()));
+                        const dt = convertUnits(100, audioVisualizer.element().clientWidth,
+                            state.elapsedTime);
+                        const time = Math.min(state.elapsedTime, currentTime + dt);
+                        state.audioPlaybackCurrentTime = function () {
+                            return time;
+                        };
+                    }
+                } else if (!hasModifier) {  // No modifiers.
+                    if (!(state.playing || state.recording)) {
+                        const currentTime =
+                            Math.max(state.trimStart, Math.min(state.elapsedTime - state.trimEnd,
+                            state.audioPlaybackCurrentTime()));
+                        const dt = convertUnits(1, audioVisualizer.element().clientWidth,
+                            state.elapsedTime);
+                        const time = Math.min(state.elapsedTime, currentTime + dt);
+                        state.audioPlaybackCurrentTime = function () {
+                            return time;
+                        };
+                    }
+                } else {  // No binding to other modifiers.
+                    return;
+                }
+                break;
+            case "BracketLeft":
+                if (!(state.playing || state.recording)) {
+                    if (event.shiftKey) {  // Shift key.
+                        const dt = convertUnits(10, audioVisualizer.element().clientWidth,
+                            state.elapsedTime);
+                        const minTime = 0;
+                        const maxTime = state.elapsedTime - state.trimEnd;
+                        state.trimStart =
+                            Math.max(minTime, Math.min(maxTime, state.trimStart - dt));
+                    } else if (!hasModifier) {  // No modifiers.
+                        const dt = convertUnits(10, audioVisualizer.element().clientWidth,
+                            state.elapsedTime);
+                        const minTime = 0;
+                        const maxTime = state.elapsedTime - state.trimEnd;
+                        state.trimStart =
+                            Math.max(minTime, Math.min(maxTime, state.trimStart + dt));
+                    } else {  // No binding to other modifiers.
+                        return;
+                    }
+                } else {  // No binding when not in correct state.
+                    return;
+                }
+                break;
+            case "BracketRight":
+                if (!(state.playing || state.recording)) {
+                    if (event.shiftKey) {  // Shift key.
+                        const dt = convertUnits(10, audioVisualizer.element().clientWidth,
+                            state.elapsedTime);
+                        const minTime = 0;
+                        const maxTime = state.elapsedTime - state.trimStart;
+                        state.trimEnd = Math.max(minTime, Math.min(maxTime, state.trimEnd - dt));
+                    } else if (!hasModifier) {  // No modifiers.
+                        const dt = convertUnits(10, audioVisualizer.element().clientWidth,
+                            state.elapsedTime);
+                        const minTime = 0;
+                        const maxTime = state.elapsedTime - state.trimStart;
+                        state.trimEnd = Math.max(minTime, Math.min(maxTime, state.trimEnd + dt));
+                    } else {  // No binding to other modifiers.
+                        return;
+                    }
+                } else {  // No binding when not in correct state.
+                    return;
+                }
+                break;
+            case "Digit0":  // 0 or ) key.
+            case "Numpad0":  // 0 on number pad.
+                if (!hasModifier) {  // No modifiers.
+                    buttonZoomReset.element().click();
+                } else {  // No binding to modifiers.
+                    return;
+                }
+                break;
+            case "Enter":  // Return key.
+            case "NumpadEnter":  // Return key on number pad.
+                if (loadFile.element() === document.activeElement) {
+                    if (!hasModifier) {  // No modifiers.
+                        buttonLoad.click();
+                    } else {  // No binding to modifiers.
+                        return;
+                    }
+                } else {  // Do not bind if not on loadFile element.
+                    return;
+                }
+                break;
+            case "Equal":  // + or = key.
+            case "NumpadAdd":  // + on number pad.
+                if (event.shiftKey || !hasModifier) {  // + or =.
+                    buttonZoomIn.element().click();
+                } else {  // No binding to other modifiers.
+                    return;
+                }
+                break;
+            case "KeyF":  // F key.
+                if (event.shiftKey || !hasModifier) {  // F or f.
+                    const x = convertUnits(state.audioPlaybackCurrentTime(), state.elapsedTime,
+                        audioVisualizer.element().clientWidth) -
+                        0.5 * audioUI.element().clientWidth;
+                    const scroll = Math.max(0, Math.min(maxScroll, x));
+                    audioUI.element().scrollLeft = scroll;
+                } else {  // No binding to other modifiers.
+                    return;
+                }
+                break;
+            case "KeyL":  // L key.
+                if (event.shiftKey || !hasModifier) {  // L or l.
+                    if (state.online) {
+                        loadFile.element().focus();
+                    } else {
+                        loadFileLabel.element().click();
+                    }
+                } else {  // No binding to other modifiers.
+                    return;
+                }
+                break;
+            case "KeyO":  // O key.
+                if (event.shiftKey || !hasModifier) {  // O or o.
+                    onlineResource(!state.online);
+                } else {  // No binding to other modifiers.
+                    return;
+                }
+                break;
+            case "KeyR":  // R key.
+                if (event.shiftKey || !hasModifier) {  // R or r.
+                    buttonRecord.element().click();
+                } else {  // No binding to other modifiers.
+                    return;
+                }
+                break;
+            case "KeyS":  // S key.
+                if (event.shiftKey || !hasModifier) {  // S or s.
+                    buttonSave.element().click();
+                } else {  // No binding to other modifiers.
+                    return;
+                }
+                break;
+            case "KeyT":  // T key.
+                if (event.shiftKey || !hasModifier) {  // T or t.
+                    buttonTag.element().click();
+                } else {  // No binding to other modifiers.
+                    return;
+                }
+                break;
+            case "Minus":  // - or _ key.
+            case "NumpadSubtract":  // - on number pad.
+                if (event.shiftKey || !hasModifier) {  // - or _.
+                    buttonZoomOut.element().click();
+                } else {  // No binding to other modifiers.
+                    return;
+                }
+                break;
+            case "Space":  // Spacebar.
+                if (!hasModifier) {  // No modifiers.
+                    (state.playing || state.recording ? buttonStop : buttonPlay).element().click();
+                } else {  // No binding to modifiers.
+                    return;
+                }
+                break;
+
+            // Keys we don't want to bind to.
+            default:
+                return;
+                break;
+        }
+
+        event.preventDefault();
+    };
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+    //
     // Helper functions for the entire library.
     //
     ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -843,9 +1289,11 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
      * Changes the load label to the parameter string. If the string is nil or unset, will reset to
      * the default message, "Click here to select file".
      */
-    const changeLoadLabel = function (message = null) {
+    const changeLoadLabel = function (/* message = null */) {
+        const message = getArgument(arguments, 0, null);
         if (isNil(message)) {
             loadFileLabel.set("innerHTML", "Click here to select file.");
+            loadFile.element().value = null;
         } else {
             loadFileLabel.set("innerHTML", message);
         }
@@ -859,9 +1307,48 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
     };
 
     /**
+     * Creates a custom AuO modal. Requires an inner FunctionalElement tree to be passed in as the
+     * parameter. A modal also has the specal functions, launch() and close(), which launch and
+     * close the modal, respecively.
+     */
+    const createModal = function (tree) {
+        const modal = new FunctionalElement("div")
+            .style("z-index",
+                window.getComputedStyle(container.element()).getPropertyValue("z-index") + 4)
+            .class(css_namespace)
+            .append(new FunctionalElement("div").class("middle-container")
+                .append(new FunctionalElement("div").class("center-container")
+                    .append(new FunctionalElement("div")
+                        .style("display", "inline-block")
+                        .style("margin", "auto")
+                        .style("width", "auto")
+                        .class("auo-main-ui")
+                        .append(tree)
+                    )
+                )
+            )
+            .listen("keydown", function (event) {
+                if ("Escape" === event.code) {
+                    modal.close();
+                }
+            });
+        modal.launch = function () {
+            state.bindKeys = false;
+            modal.attach(mainUI);
+        };
+        modal.close = function () {
+            modal.detach();
+            state.bindKeys = true;
+            container.element().focus();
+        };
+        return modal;
+    };
+
+    /**
      * Enables and disables editor mode, which determines whether editing features are on.
      */
-    const editorMode = function (on = true) {
+    const editorMode = function (/* on = true */) {
+        const on = getArgument(arguments, 0, true);
         state.editor = on;
         audioEndTrimmer.set("draggable", on);
         audioStartTrimmer.set("draggable", on);
@@ -869,36 +1356,113 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
     };
 
     /**
-     * Returns an array of MIME types that are supported.
+     * Function for setting default argument values. Retrieves an argument's value from the calling
+     * function's argument list, or returns the default value if there is no such argument. This is
+     * done for the sake of support Safari et al, which don't support default values for function
+     * arguments.
+     *
+     * For documentation purposes, functions using default arguments should leave the default
+     * argument list in the function declaration, but commented out using block comments. This shows
+     * callers the calling API, even though the actual handling of arguments has changed.
+     *
+     * arguments -- the arguments of the caller function. Used instead of
+     *     getArgument.caller.arguments to have wider support capabilities.
+     * index -- the index of the argument whose value we are retrieving.
+     * default_value -- the default value if the argument was not passed to the caller.
+     */
+    const getArgument = function (args, index, default_value) {
+        return index < args.length ? args[index] : default_value;
+    };
+
+    /**
+     * Returns an array of file extensions that are supported. These correspond to the MIME types
+     * specified in getSupportedMIMEs().
+     */
+    const getSupportedExtensions = function () {
+        return [
+            ".aac",
+            ".m4a",
+            ".m4p",
+            ".m4r",
+            ".mp3",
+            ".mp4",
+            ".mpa",
+            ".mpe",
+            ".mpeg",
+            ".mpg",
+            ".ogg",
+            ".ogv",
+            ".wav",
+            ".wave",
+            ".webm",
+        ];
+    };
+
+    /**
+     * Returns an array of MIME types that are supported. Some video codecs are supported as well,
+     * though the video track will be lost on save.
      */
     const getSupportedMIMEs = function () {
         return [
+            "audio/aac",
+            "audio/m4p",
+            "audio/mp3",
+            "audio/mp4",
+            "audio/mpeg",
+            "audio/ogg",
             "audio/wav",
             "audio/wave",
             "audio/webm",
-            ];
+            "audio/x-aac",
+            "audio/x-m4a",
+            "audio/x-pn-wav",
+            "audio/x-wav",
+            "video/mp4",
+            "video/mpeg",
+            "video/ogg",
+            "video/webm",
+        ];
+    };
+
+    /**
+     * Returns an array of both the MIME types and file extensions that are supported. This allows
+     * for easier creation of accepts in file input elements.
+     */
+    const getSupportedMediaTypes = function () {
+        return getSupportedMIMEs().concat(getSupportedExtensions());
     };
 
     /**
      * Helper function that resets all control UI buttons into the idle state. Resets the innerHTML
-     * content and the disabled statuses. In the idle state, all buttons are enabled except the
-     * stop button. Note that this is not the launch state.
+     * content and the disabled statuses. Will automatically check for the launch state vs idle
+     * state and appropriate enable or disable the buttons.
      */
     const idleControls = function() {
         buttonRecord.set("innerHTML", "Record");
         buttonPlay.set("innerHTML", "Play");
         buttonStop.set("innerHTML", "Stop");
         changeLoadLabel();
-        buttonLoad.set("innerHTML", "Load");
-        buttonSave.set("innerHTML", "Save");
+        buttonLoad.set("innerHTML", state.online ? "Fetch" : "Load");
+        buttonSave.set("innerHTML", state.online ? "Upload" : "Download");
 
         toggleInput(buttonRecord);
-        toggleInput(buttonPlay);
+        toggleInput(buttonPlay, !isNil(state.audioBuffer));
         toggleInput(buttonStop, false);
         toggleInput(buttonLoad, false);
         toggleInput(loadFile);
-        toggleInput(buttonSave);
+        toggleInput(buttonSave, !(isNil(SAVE_URL) && state.online || isNil(state.audioBuffer)));
         toggleInput(saveOptions);
+
+        tagUI.class("idle");
+
+        // Throw focus back to the first input or button element of the modal if one is up.
+        const modal = mainUI.element().querySelector(".AuO");
+        if (!isNil(modal)) {
+            const modalInput = modal.querySelector("input, button");
+            if (!isNil(modalInput)) {
+                modalInput.focus();
+            }
+        }
     };
 
     /**
@@ -909,6 +1473,81 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
     };
 
     /**
+     * Local save callback function. Creates a new anchor that targets the blob, then activates the
+     * link. The blob to target is the input argument.
+     */
+    const LOCAL_SAVE_CALLBACK = getArgument(arguments, 2, function (blob) {
+        const a = new FunctionalElement("a")
+            .style("display", "none")
+            .set("target", "_blank")
+            .set("href", window.URL.createObjectURL(blob))
+            .set("download", "recording." + saveFormat())
+            .attach(mainUI);
+        a.element().click();
+        a.detach();
+    });
+
+    /**
+     * Toggles the resource to either online mode (true) or offline mode (false).
+     */
+    const onlineResource = function (/* online = true */) {
+        const online = getArgument(arguments, 0, true);
+        resourceOnline.class("selected", online);
+        resourceOffline.class("selected", !online);
+        loadFile
+            .class("online", online)
+            .class("offline", !online)
+            .set("type", online ? "url" : "file")
+            .element().value = null;
+        changeLoadLabel();
+
+        state.online = online;
+
+        if (!(state.playing || state.recording)) {
+            idleControls();
+        }
+    };
+
+    const SAVE_CALLBACK = getArgument(arguments, 1, function (request) {
+        state.bindKeys = false;
+        const input = new FunctionalElement("input");
+        const modalContents = new FunctionalElement("div")
+            .append(new FunctionalElement("div")
+                .set("innerHTML", "Link to saved audio clip: ")
+            ).append(input
+                .style("display", "block")
+                .style("font-family", "inherit")
+                .style("margin", "10px auto")
+                .style("width", "200px")
+                .set("value", request.response)
+                .listen("keydown", function (event) {
+                    if ("Enter" === event.code || "NumpadEnter" === event.code) {
+                        modal.close();
+                    }
+                })
+            ).append(new FunctionalElement("button")
+                .style("display", "block")
+                .style("font-family", "inherit")
+                .style("font-size", "inherit")
+                .style("margin", "auto")
+                .style("padding", "5px")
+                .style("width", "100px")
+                .set("innerHTML", "OK")
+                .listen("click", function (event) {
+                    modal.close();
+                })
+            );
+        const closeModal = function (label) {
+            state.tags[parseFloat(time)] = (0 < label.length ? label : time + "s");
+            state.tagsSynced = false;
+            modal.close();
+        };
+        const modal = createModal(modalContents);
+        modal.launch();
+        input.element().select();
+    });
+
+    /**
      * Returns the currently-selected save format.
      */
     const saveFormat = function () {
@@ -916,6 +1555,11 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
         const format = saveOptions.element().options[index].value;
         return format;
     };
+
+    /**
+     * The URl to save at. Defaults to null, which disables online saving.
+     */
+    const SAVE_URL = getArgument(arguments, 0, null);
 
     /**
      * Constant for allowed slack between two times to still consider them to be equal. Used to
@@ -936,7 +1580,8 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
     /**
      * Toggles the button into the enabled/disabled state.
      */
-    const toggleInput = function (button, enable = true) {
+    const toggleInput = function (button /* , enable = true */) {
+        const enable = getArgument(arguments, 1, true);
         if (enable) {
             button.set("disabled", null).style("color", "#000");
         } else {
@@ -1031,7 +1676,8 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
      *
      * @constructor
      */
-    const FunctionalElement = function (tagname, count = 1) {
+    const FunctionalElement = function (tagname /* , count = 1 */) {
+        const count = getArgument(arguments, 1, 1);
         const elements = [];
         for (var i = 0; i < count; i++) {
             elements.push(document.createElement(tagname));
@@ -1056,7 +1702,8 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
         this.count = function () {
             return elements.length;
         };
-        this.element = function (index = 0) {
+        this.element = function (/* index = 0 */) {
+            const index = getArgument(arguments, 0, 0);
             return elements[index];
         };
         this.get = function (attribute) {
@@ -1064,7 +1711,8 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
             return this.element().getAttribute(attribute);
         };
         this.set = function (attribute, value) {
-            for (const element of elements) {
+            for (var item of elements) {
+                const element = item;
                 if ("innerHTML" === attribute) {
                     element.innerHTML = (isNil(value) ? "" : value);
                 } else {
@@ -1077,46 +1725,55 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
             }
             return this;
         };
-        this.class = function (classname, add = true) {
-            for (const element of elements) {
+        this.class = function (classname /* , add = true */) {
+            const add = getArgument(arguments, 1, true);
+            for (var item of elements) {
+                const element = item;
                 element.classList.toggle(classname, add);
             }
             return this;
         };
         this.style = function (property, value) {
-            for (const element of elements) {
+            for (var item of elements) {
+                const element = item;
                 element.style.setProperty(property, value);
             }
             return this;
         };
-        this.append = function (child, index = 0) {
+        this.append = function (child /*, index = 0 */) {
+            const index = getArgument(arguments, 1, 0);
             for (var i = 0; i < child.count(); i++) {
                 this.element(index).appendChild(child.element(i));
             }
             return this;
         };
         this.remove = function (child) {
-            for (const element of elements) {
+            for (var item of elements) {
+                const element = item;
                 element.removechild(child.element());
             }
             return this;
         };
-        this.attach = function (parent, index = 0) {
+        this.attach = function (parent /* , index = 0 */) {
+            const index = getArgument(arguments, 1, 0);
             if (!isNil(parent)) {
-                for (const element of elements) {
+                for (var item of elements) {
+                    const element = item;
                     parent.element(index).appendChild(element);
                 }
             }
             return this;
         };
         this.detach = function () {
-            for (const element of elements) {
+            for (var item of elements) {
+                const element = item;
                 isNil(element.parentNode) || element.parentNode.removeChild(element);
             }
             return this;
         };
         this.listen = function (event, callback) {
-            for (const element of elements) {
+            for (var item of elements) {
+                const element = item;
                 element.addEventListener(event, callback);
             }
             return this;
@@ -1188,6 +1845,11 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
     const audioEndTrimmerLabel = new FunctionalElement("div");
     const audioEndTrimmerVisual = new FunctionalElement("canvas");
 
+    // Tag UI. For checkpointing via tagging times using the ticker.
+    const tagUI = new FunctionalElement("div");
+    const buttonTag = new FunctionalElement("button");
+    const tagList = new FunctionalElement("div");
+
     // Container for the load UI.
     const loadUI = new FunctionalElement("div");
 
@@ -1197,6 +1859,11 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
 
     // Load button.
     const buttonLoad = new FunctionalElement("button");
+
+    // Resource UI: online/offline toggle.
+    const resourceUI = new FunctionalElement("div");
+    const resourceOnline = new FunctionalElement("div");
+    const resourceOffline = new FunctionalElement("div");
 
     // Container for the save UI.
     const saveUI = new FunctionalElement("div");
@@ -1228,6 +1895,8 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
 
     // Clicking the record button.
     buttonRecord.listen("click", function (event) {
+        container.element().focus();
+
         stateReset();
         zoomUpdate();
         state.recording = true;
@@ -1237,11 +1906,18 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
         toggleInput(buttonPlay, false);
         toggleInput(buttonStop);
         toggleInput(buttonSave, false);
+        tagUI.class("idle", false);
         toggleInput(buttonRecord, false);
+
+        state.audioPlaybackCurrentTime = function () {
+            return state.elapsedTime;
+        };
     });
 
     // Clicking the play button.
     buttonPlay.listen("click", function (event) {
+        container.element().focus();
+
         state.playing = true;
 
         editorMode(false);
@@ -1249,18 +1925,20 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
         toggleInput(buttonRecord, false);
         toggleInput(buttonSave, false);
         toggleInput(buttonStop);
+        tagUI.class("idle", false);
         toggleInput(buttonPlay, false);
 
         const currentTime = Math.max(state.trimStart, state.audioPlaybackCurrentTime());
         const endTime = state.elapsedTime - state.trimEnd;
         const startTime = (currentTime > endTime || timeEqualsA(currentTime, endTime) ?
             state.trimStart : currentTime);
-        state.audioTickerSync = true;
         beginAudioPlayback(startTime, endTime);
     });
 
     // Clicking the stop button.
     buttonStop.listen("click", function (event) {
+        container.element().focus();
+
         if (state.playing) {
             state.audioPlaybackSource.stop();
             if (!isNil(state.audioPlaybackSource)) {
@@ -1305,6 +1983,55 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
         animateAudioDisplayByForce();
     });
 
+    // Clicking the tag current ticker location button.
+    buttonTag.listen("click", function (event) {
+        const time = Math.max(state.trimStart, Math.min(state.elapsedTime - state.trimEnd,
+            state.audioPlaybackCurrentTime())).toFixed(3);
+        const labelInput = new FunctionalElement("input");
+        const labelButton = new FunctionalElement("button");
+        const modalContents = new FunctionalElement("div")
+            .append(new FunctionalElement("div")
+                .set("innerHTML",
+                    "Please enter a label for the tag at " + time +
+                    "s. Leave the field blank to use the time as the label.")
+            ).append(labelInput
+                .style("display", "block")
+                .style("font-family", "inherit")
+                .style("font-size", "1.2em")
+                .style("margin", "10px auto")
+                .set("value", time + "s")
+                .listen("keydown", function (event) {
+                    if ("Enter" === event.code || "NumpadEnter" === event.code) {
+                        labelButton.element().click();
+                    }
+                })
+            ).append(labelButton
+                .style("display", "block")
+                .style("font-family", "inherit")
+                .style("font-size", "inherit")
+                .style("margin", "auto")
+                .style("padding", "5px")
+                .style("width", "100px")
+                .set("innerHTML", "OK")
+                .listen("click", function (event) {
+                    closeModal(this.previousSibling.value);
+                })
+            )
+            .listen("keydown", function (event) {
+                if ("Escape" === event.code) {
+                    closeModal("");
+                }
+            });
+        const closeModal = function (label) {
+            state.tags[parseFloat(time)] = (0 < label.length ? label : time + "s");
+            state.tagsSynced = false;
+            modal.close();
+        };
+        const modal = createModal(modalContents);
+        modal.launch();
+        labelInput.element().select();
+    });
+
     // Clicking the label for file loading.
     loadFileLabel.listen("click", function (event) {
         loadFile.element().click();
@@ -1312,6 +2039,8 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
 
     // Clicking the load button.
     buttonLoad.listen("click", function (event) {
+        container.element().focus();
+
         // UI change to let user know that load is being processed.
         buttonLoad.set("innerHTML", "Processing...");
         editorMode(false);
@@ -1320,12 +2049,25 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
         toggleInput(buttonRecord, false);
         toggleInput(buttonSave, false);
         toggleInput(saveOptions, false);
+        tagUI.class("idle", false);
 
-        beginAudioLoad(loadFile.element().files);
+        beginAudioLoad(state.online ? [loadFile.element().value] : loadFile.element().files);
+    });
+
+    // Clicking the online resource label.
+    resourceOnline.listen("click", function (event) {
+        onlineResource();
+    });
+
+    // Clicking the offline resource label.
+    resourceOffline.listen("click", function (event) {
+        onlineResource(false);
     });
 
     // Clicking the save button.
     buttonSave.listen("click", function (event) {
+        container.element().focus();
+
         // UI change to let user know that save is being processed.
         buttonSave.set("innerHTML", "Processing...");
         editorMode(false);
@@ -1334,17 +2076,20 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
         toggleInput(buttonPlay, false);
         toggleInput(buttonRecord, false);
         toggleInput(saveOptions, false);
+        tagUI.class("idle", false);
 
         const endTime = state.elapsedTime - state.trimEnd;
         const startTime = state.trimStart;
 
         beginAudioSave(function (blob) {
-            if (isNil(SAVE_URL)) {
+            if (!state.online || isNil(SAVE_URL)) {
                 editorMode(true);
                 idleControls();
 
-                // If no save URL is provided, run the save callback function on the blob.
-                SAVE_CALLBACK(blob);
+                // If no save URL is provided, or we're in offline mode, run the save callback
+                // function on the blob. The online part is mostly to deal with hacking the HTML to
+                // force the save button to be enabled when online saving is not available.
+                LOCAL_SAVE_CALLBACK(blob);
             } else {
                 // If a save URL is provided, send an XHR to the target URL with the blob.
                 const request = new XMLHttpRequest();
@@ -1381,9 +2126,6 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
         event.dataTransfer.setData("text", "audioStartTrimmer");
         event.dataTransfer.effectAllowed = "move";
 
-        // Disable automatic syncing.
-        state.audioTrimSync = false;
-
         // Remember the x coordinate where the drag started. This is aligned with the start of the
         // visualizer.
         const xRef = event.offsetX + parseInt(audioEndTrimmer.element().offsetLeft);
@@ -1401,7 +2143,6 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
         state.audioOnDrop = function (event) {
             event.preventDefault();
             event.stopPropagation();
-            state.audioTrimSync = true;
             animateAudioTrimmers();
         };
 
@@ -1415,9 +2156,6 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
     audioStartTrimmer.listen("dragstart", function (event) {
         event.dataTransfer.setData("text", "audioStartTrimmer");
         event.dataTransfer.effectAllowed = "move";
-
-        // Disable automatic syncing.
-        state.audioTrimSync = false;
 
         // Remember the x coordinate where the drag started. This is aligned with the start of the
         // visualizer.
@@ -1436,7 +2174,6 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
         state.audioOnDrop = function (event) {
             event.preventDefault();
             event.stopPropagation();
-            state.audioTrimSync = true;
             animateAudioTrimmers();
         };
 
@@ -1451,9 +2188,6 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
         event.dataTransfer.setData("text", "audioTicker");
         event.dataTransfer.effectAllowed = "move";
 
-        // Disable automatic syncing.
-        state.audioTickerSync = false;
-
         state.audioOnDrag = function (x) {
             const canvasWidth = audioDisplay.get("width");
             const tickerWidth = audioTicker.element().offsetWidth;
@@ -1467,7 +2201,6 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
         state.audioOnDrop = function (event) {
             event.preventDefault();
             event.stopPropagation();
-            state.audioTickerSync = true;
             animateAudioTicker();
         };
 
@@ -1504,9 +2237,16 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
         event.dataTransfer.setDragImage(emptyDragImage.element(), 0, 0);
     });
 
+    // Function for muting dragover events.
+    const audioMuteDragoverHandler = function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEvent = "move";
+    };
+
     // Function for handling drop events.
     const audioDropHandler = function (event) {
-        event.preventDefault();
+        event.stopPropagation();
 
         state.audioOnDrop(event);
 
@@ -1516,58 +2256,39 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
     };
 
     audioEndTrimmer.listen("dragover", function (event) {
-        event.preventDefault();
-        event.stopPropagation();
-        event.dataTransfer.dropEvent = "move";
         state.audioOnDrag(event.offsetX + parseInt(audioEndTrimmer.element().offsetLeft));
     });
 
     audioEndTrimmerVisual.listen("dragover", function (event) {
-        event.preventDefault();
-        event.stopPropagation();
-        event.dataTransfer.dropEvent = "move";
         state.audioOnDrag(event.offsetX + parseInt(audioEndTrimmerVisual.element().offsetLeft) +
             parseInt(audioEndTrimmer.element().offsetLeft));
     });
 
     audioStartTrimmer.listen("dragover", function (event) {
-        event.preventDefault();
-        event.stopPropagation();
-        event.dataTransfer.dropEvent = "move";
         state.audioOnDrag(event.offsetX);
     });
 
     audioStartTrimmerVisual.listen("dragover", function (event) {
-        event.preventDefault();
-        event.stopPropagation();
-        event.dataTransfer.dropEvent = "move";
         state.audioOnDrag(event.offsetX + parseInt(audioStartTrimmerVisual.element().offsetLeft));
     });
 
     audioTicker.listen("dragover", function (event) {
-        event.preventDefault();
-        event.stopPropagation();
-        event.dataTransfer.dropEvent = "move";
         state.audioOnDrag(event.offsetX + parseInt(audioTicker.element().offsetLeft));
     });
 
     audioVisualizer.listen("dragover", function (event) {
-        event.preventDefault();
-        event.stopPropagation();
-        event.dataTransfer.dropEvent = "move";
         state.audioOnDrag(event.offsetX);
     });
 
-    container.listen("dragover", function (event) {
-        event.preventDefault();
-        event.stopPropagation();
-        event.dataTransfer.dropEvent = "move";
-    });
-
     // Attach drop handlers.
-    for (node of [audioDisplayContainer, audioEndTrimmer, audioEndTrimmerVisual, audioStartTrimmer,
-            audioStartTrimmerVisual, audioVisualizer, container]) {
-        node.listen("drop", audioDropHandler);
+    const addAudioDropHandlers = function () {
+        (function addAudioDropHandler (element) {
+            element.addEventListener("drop", audioDropHandler);
+            element.addEventListener("dragover", audioMuteDragoverHandler);
+            for (var i = 0; i < element.childNodes.length; i++) {
+                addAudioDropHandler(element.childNodes[i]);
+            }
+        })(container.element());
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1576,21 +2297,15 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
     //
     ////////////////////////////////////////////////////////////////////////////////////////////////
 
+    // Hotkey functionality.
+    container.listen("keydown", hotkeyHandler);
+
     // Completing a file selection.
-    loadFile.listen("change", function (event) {
-        const files = loadFile.element().files;
-        if (0 === files.length) {
-            loadFileLabel.set("innerHTML", "Click here to select file");
-            toggleInput(buttonLoad, false);
-        } else {
-            const selections = Array.prototype.reduce.call(files, function (prev, file) {
-                prev.push(file.name);
-                return prev;
-            }, []);
-            loadFileLabel.set("innerHTML", selections.sort().join("<br />"));
-            toggleInput(buttonLoad);
-        }
-    });
+    loadFile.listen("change", loadFileHandler);
+
+    // Typing a file URL.
+    loadFile.listen("keydown", loadFileHandler);
+    loadFile.listen("keyup", loadFileHandler);
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
     //
@@ -1630,10 +2345,16 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
                         .append(audioTicker
                             .append(audioTickerLabel)
                         )
+                    ).append(tagUI
+                        .append(buttonTag)
+                        .append(tagList)
                     ).append(loadUI
-                        .append(loadFileLabel)
                         .append(loadFile)
+                        .append(loadFileLabel)
                         .append(buttonLoad)
+                    ).append(resourceUI
+                        .append(resourceOnline)
+                        .append(resourceOffline)
                     ).append(saveUI
                         .append(saveOptionsLabel)
                         .append(saveOptions)
@@ -1653,7 +2374,7 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
     // This namespace must match the one in the anonymous function for creating AuO styles below.
     const css_namespace = "AuO";
 
-    container.class(css_namespace);
+    container.class(css_namespace).set("tabIndex", "0");
 
     mainUI.class("auo-main-ui");
 
@@ -1662,42 +2383,57 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
     titleClose.class("auo-title-close").set("innerHTML", "[Close] &times;");
 
     controlsUI.class("auo-controls-ui");
-    buttonRecord.class("auo-controls-record-button");
-    buttonPlay.class("auo-controls-play-button");
-    buttonStop.class("auo-controls-stop-button");
+    buttonRecord.class("auo-controls-record-button").set("title", "Hotkey: [R]");
+    buttonPlay.class("auo-controls-play-button").set("title", "Hotkey (toggle): [Space]");
+    buttonStop.class("auo-controls-stop-button").set("title", "Hotkey (toggle): [Space]");
 
     audioUI.class("auo-audio-ui");
     audioDisplayContainer.class("auo-audio-display-container");
     audioDisplay.class("auo-audio-display");
 
     audioVisualizer.class("auo-audio-visualizer").set("draggable", true);
-    audioTicker.class("auo-audio-ticker");
+    audioTicker.class("auo-audio-ticker")
+        .set("title", "Left/right arrowkeys to reposition. Hold SHIFT for larger intervals.");
     audioTickerLabel.class("auo-audio-ticker-label");
-    audioStartTrimmer.class("auo-audio-start-trimmer");
+    audioStartTrimmer.class("auo-audio-start-trimmer").set("title", "[ to increase trim, { to decrease trim");
     audioStartTrimmerLabel.class("auo-audio-start-trimmer-label");
-    audioEndTrimmer.class("auo-audio-end-trimmer");
+    audioEndTrimmer.class("auo-audio-end-trimmer").set("title", "] to increase trim, { to decrease trim");
     audioEndTrimmerLabel.class("auo-audio-end-trimmer-label");
 
     zoomUI.class("auo-zoom-ui");
-    buttonZoomIn.class("auo-zoom-in-button").set("innerHTML", "Zoom in");
-    buttonZoomOut.class("auo-zoom-out-button").set("innerHTML", "Zoom out");
-    buttonZoomReset.class("auo-zoom-reset-button").set("innerHTML", "Zoom reset");
+    buttonZoomIn.class("auo-zoom-in-button").set("innerHTML", "Zoom in")
+        .set("title", "Hotkey: [+]");
+    buttonZoomOut.class("auo-zoom-out-button").set("innerHTML", "Zoom out")
+        .set("title", "Hotkey: [-]");
+    buttonZoomReset.class("auo-zoom-reset-button").set("innerHTML", "Zoom reset")
+        .set("title", "Hotkey: [0]");
     zoomDisplay.class("auo-zoom-display");
 
-    loadUI.class("auo-load-ui");
-    loadFileLabel.class("auo-load-file-label").class("middle-container");
-    loadFile.class("auo-load-file").set("accept", getSupportedMIMEs().join(","))
-        .set("type", "file");
+    tagUI.class("auo-tag-ui");
+    buttonTag.class("auo-tag-button").set("innerHTML", "Tag current<br />ticker location")
+        .set("title", "Hotkey: [T]");
+    tagList.class("auo-tag-list");
+
+    loadUI.class("auo-load-ui").class("middle-container");
+    loadFileLabel.class("auo-load-file-label").set("title", "Hotkey: [L]");
+    loadFile.class("auo-load-file").set("accept", getSupportedMediaTypes().join(","))
+        .set("placeholder", "Enter URL here").set("title", "Hotkey: [L]");
     buttonLoad.class("auo-load-button");
 
-    saveUI.class("auo-save-ui");
+    resourceUI.class("auo-resource-ui");
+    resourceOnline.class("auo-resource-online").set("innerHTML", "Online")
+        .set("title", "Hotkey (toggle): [O]");
+    resourceOffline.class("auo-resource-offline").set("innerHTML", "Offline")
+        .set("title", "Hotkey (toggle): [O]");
+
+    saveUI.class("auo-save-ui").class("middle-container");
     saveOptionsLabel.class("auo-save-options-label").set("innerHTML", "Save file format:");
     saveOptions.class("auo-save-options");
     saveOptionWAV.set("innerHTML", "WAV").set("value", "wav").attach(saveOptions);
     if ("Chrome" !== browserName() || 50 <= browserVersionMajor()) {
         saveOptionWEBM.set("innerHTML", "WebM").set("value", "webm").attach(saveOptions);
     }
-    buttonSave.class("auo-save-button");
+    buttonSave.class("auo-save-button").set("title", "Hotkey: [S]");
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
     //
@@ -1738,7 +2474,8 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
         // Retrieves the corresponding CSSStyleSheet object.
         const sheet = element.sheet;
 
-        this.rule = function (rule, media = null) {
+        this.rule = function (rule /* , media = null */) {
+            const media = 1 < arguments.length ? arguments[1] : null;
             rule = "." + namespace + " " + rule.replace(/[\s]+/g, " ");
             if (undefined !== media && null !== media) {
                 rule = "@media " + media + " { " + rule + " }";
@@ -1810,6 +2547,7 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
 
     Sheet.rule(`button {
         font-family: inherit;
+        font-size: 8pt;
     }`);
 
     Sheet.rule(`.auo-main-ui {
@@ -2098,10 +2836,54 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
         display: block;
     }`);
 
+    Sheet.rule(`.auo-tag-ui {
+        margin: 5px 0px;
+    }`);
+
+    Sheet.rule(`.auo-tag-ui > * {
+        box-sizing: border-box;
+        display: inline-block;
+        vertical-align: middle;
+    }`);
+
+    Sheet.rule(`.auo-tag-button {
+        width: 100px;
+    }`);
+
+    Sheet.rule(`.auo-tag-list {
+        max-height: 100px;
+        overflow: auto;
+        padding: 0 5px;
+        white-space: normal;
+        width: calc(100% - 100px);
+    }`);
+
+    Sheet.rule(`.auo-tag-list > label {
+        border: 1px solid black;
+        border-radius: 25px;
+        box-sizing: border-box;
+        display: inline-block;
+        font-size: 0.8em;
+        margin: 1px;
+        min-width: 50px;
+        padding: 5px;
+        text-align: center;
+    }`);
+
+    Sheet.rule(`.auo-tag-ui .auo-tag-list * {
+        border-color: #888;
+        color: #888;
+    }`);
+
+    Sheet.rule(`.auo-tag-ui.idle .auo-tag-list * {
+        border-color: black;
+        color: black;
+    }`);
+
     Sheet.rule(`.auo-load-ui {
         display: inline-block;
         text-align: justify;
-        width: 50%;
+        width: 40%;
     }`, `(min-width: 1280px)`);
 
     Sheet.rule(`.auo-load-ui {
@@ -2110,41 +2892,92 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
         width: 100%;
     }`, `(max-width: 1280px)`);
 
-    Sheet.rule(`.auo-load-ui > *{
-        vertical-align: middle;
-    }`);
-
-    Sheet.rule(`.auo-load-file-label {
+    Sheet.rule(`.auo-load-ui > *:not(button) {
         border: 1px solid black;
         border-radius: 0.35em;
         box-sizing: border-box;
-        display: inline-block;
+        font-family: inherit;
         font-size: 0.9em;
-        margin-right: 0.5em;
         max-height: 4em;
         max-width: 100%;
-        overflow: auto;
         padding: 0.25em;
-        vertical-align: middle;
+    }`);
+
+    Sheet.rule(`.auo-load-file-label {
+        overflow: auto;
     }`);
 
     Sheet.rule(`.auo-load-file-label:hover {
         background-color: rgba(225, 225, 225, 0.5);
     }`);
 
-    Sheet.rule(`.auo-load-file {
+    Sheet.rule(`.auo-load-file:invalid {
+        background-color: rgba(255, 100, 100, 0.5);
+        border-color: red;
+    }`);
+
+    Sheet.rule(`.auo-load-file.offline {
+        display: none;
+    }`);
+
+    Sheet.rule(`.auo-load-file.online {
+        display: inline-block;
+    }`);
+
+    Sheet.rule(`.auo-load-file.offline ~ .auo-load-file-label {
+        display: inline-block;
+    }`);
+
+    Sheet.rule(`.auo-load-file.online ~ .auo-load-file-label {
         display: none;
     }`);
 
     Sheet.rule(`.auo-load-button {
         box-sizing: border-box;
+        margin-left: 0.5em;
         width: 100px;
+    }`);
+
+    Sheet.rule(`.auo-resource-ui {
+        display: inline-block;
+        text-align: center;
+        width: 20%;
+    }`, `(min-width: 1280px)`);
+
+    Sheet.rule(`.auo-resource-ui {
+        display: block;
+        text-align: center;
+        width: 100%;
+    }`, `(max-width: 1280px)`);
+
+    Sheet.rule(`.auo-resource-ui > div {
+        border: 1px solid black;
+        box-sizing: border-box;
+        color: #888;
+        display: inline-block;
+        font-size: 10pt;
+        font-variant: small-caps;
+        padding: 2.5px;
+        width: 75px;
+    }`);
+
+    Sheet.rule(`.auo-resource-ui > div.selected {
+        background: green;
+        color: white;
+    }`);
+
+    Sheet.rule(`.auo-resource-online {
+        border-radius: 10px 0px 0px 10px;
+    }`);
+
+    Sheet.rule(`.auo-resource-offline {
+        border-radius: 0px 10px 10px 0px;
     }`);
 
     Sheet.rule(`.auo-save-ui {
         display: inline-block;
         text-align: right;
-        width: 50%;
+        width: 40%;
     }`, `(min-width: 1280px)`);
 
     Sheet.rule(`.auo-save-ui {
@@ -2152,10 +2985,6 @@ const AuO = function (SAVE_URL = null, SAVE_CALLBACK = null) {
         text-align: center;
         width: 100%;
     }`, `(max-width: 1280px)`);
-
-    Sheet.rule(`.auo-save-ui > *{
-        vertical-align: middle;
-    }`);
 
     Sheet.rule(`.auo-save-options-label {
         display: inline-block;
