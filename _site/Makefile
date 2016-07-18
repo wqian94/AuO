@@ -3,6 +3,15 @@ MAIN_BRANCH := master
 SUBTREE_REMOTE := github
 SUBTREE_BRANCH := gh-pages
 
+v%:
+	@if git rev-parse -q --verify $@; then git push origin :$@; git push github :$@; fi
+	@git tag -af $@ && git push origin $@ && git push github $@
+
+subtree: subtree-master
+
+subtree-%:
+	@git push github `git subtree split --prefix _site $*`:gh-pages --force
+
 all:
 	@echo "\033[0;32mAbout to push commit(s):\033[m"
 	@git log --oneline $(MAIN_REMOTE)/$(MAIN_BRANCH)..
