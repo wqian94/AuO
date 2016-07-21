@@ -64,6 +64,7 @@ Notes:
 
 1. Chrome 49 does not support saving as WebM, so that save option is not shown in Chrome 49.
 2. Firefox does not support loading some file formats, claiming that those formats are malformed.
+3. At the moment, Safari, Opera, and Edge do not support the MediaRecorder API, which is required for capturing audio streams in JavaScript.
 
 # The AuO User Interface
 
