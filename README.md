@@ -1,4 +1,4 @@
-AuO version 1.5 (stable)
+AuO version 1.6 (stable)
 ===
 AuO (IPA: /ao/), a browser-based audio recording and editing application. Uses browser-native
 technologies to avoid third-party dependencies.
@@ -100,7 +100,8 @@ During recording, the user can zoom in and out, as well as reset the zoom to 100
 zoom does not equal 100%.
 
 To stop recording, the user can hit the `Stop` button. AuO will briefly pause to preprocess the
-data for playbacks and saves, before entering the idle state.
+data for playbacks and saves, before entering the idle state. At this point, the browser's status
+bar should also indicate that AuO is no longer using the microphone.
 
 ## Zooming
 
