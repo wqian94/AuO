@@ -599,11 +599,8 @@ const AuO = function (/* SAVE_URL = null, SAVE_CALLBACK = null, LOCAL_SAVE_CALLB
      * the entire recording if no parameters are passed in.
      */
     const beginAudioPlayback = function (/* start = 0, end = Infinity */) {
-        const start = getArgument(arguments, 0, 0);
-        const end = getArgument(arguments, 1, Infinity);
-        if (Infinity === end) {
-            end = state.elapsedTime;
-        }
+        const startTime = getArgument(arguments, 0, 0);
+        const endTime = getArgument(arguments, 1, state.elapsedTime);
 
         // Re-compute the full buffer if it is missing elements.
         if (state.audioBuffer.length < state.dataSamplesProcessed) {
@@ -626,9 +623,9 @@ const AuO = function (/* SAVE_URL = null, SAVE_CALLBACK = null, LOCAL_SAVE_CALLB
         playbackSource.connect(audioContext.destination);
 
         const playbackStartTime = audioContext.currentTime;
-        playbackSource.start(playbackStartTime, start, end - start);
+        playbackSource.start(playbackStartTime, startTime, endTime - startTime);
         state.audioPlaybackCurrentTime = function () {
-            return Math.max(0, audioContext.currentTime - playbackStartTime + start);
+            return Math.max(0, audioContext.currentTime - playbackStartTime + startTime);
         };
     };
 
@@ -2098,38 +2095,40 @@ const AuO = function (/* SAVE_URL = null, SAVE_CALLBACK = null, LOCAL_SAVE_CALLB
         const endTime = state.elapsedTime - state.trimEnd;
         const startTime = state.trimStart;
 
-        beginAudioSave(function (blob) {
-            if (!state.online || isNil(SAVE_URL)) {
-                editorMode(true);
-                idleControls();
-
-                // If no save URL is provided, or we're in offline mode, run the save callback
-                // function on the blob. The online part is mostly to deal with hacking the HTML to
-                // force the save button to be enabled when online saving is not available.
-                LOCAL_SAVE_CALLBACK(blob);
-            } else {
-                // If a save URL is provided, send an XHR to the target URL with the blob.
-                const request = new XMLHttpRequest();
-                request.open("POST", SAVE_URL, true);
-                request.onload = function() {
-                    // Change UI back to let use know that save is complete.
+        setTimeout(function () {
+            beginAudioSave(function (blob) {
+                if (!state.online || isNil(SAVE_URL)) {
                     editorMode(true);
                     idleControls();
 
-                    // [200, 300) are "okay" statuses.
-                    if (this.status >= 200 && this.status < 300) {
-                        SAVE_CALLBACK(request);
-                    } else {
+                    // If no save URL is provided, or we're in offline mode, run the save callback
+                    // function on the blob. The online part is mostly to deal with hacking the HTML to
+                    // force the save button to be enabled when online saving is not available.
+                    LOCAL_SAVE_CALLBACK(blob);
+                } else {
+                    // If a save URL is provided, send an XHR to the target URL with the blob.
+                    const request = new XMLHttpRequest();
+                    request.open("POST", SAVE_URL, true);
+                    request.onload = function() {
+                        // Change UI back to let use know that save is complete.
+                        editorMode(true);
+                        idleControls();
+
+                        // [200, 300) are "okay" statuses.
+                        if (this.status >= 200 && this.status < 300) {
+                            SAVE_CALLBACK(request);
+                        } else {
+                            alert("Save failed. Error occurred while saving.");
+                        }
+                    };
+                    request.onerror = function () {
+                        idleControls();
                         alert("Save failed. Error occurred while saving.");
-                    }
-                };
-                request.onerror = function () {
-                    idleControls();
-                    alert("Save failed. Error occurred while saving.");
-                };
-                request.send(blob);
-            }
-        }, startTime, endTime);
+                    };
+                    request.send(blob);
+                }
+            }, startTime, endTime);
+        }, 5);
     });
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
